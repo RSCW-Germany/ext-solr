@@ -238,6 +238,27 @@ abstract class AbstractInitializer implements IndexQueueInitializer
         return $pageIdField . ' IN(' . implode(',', $pages) . ')';
     }
 
+    protected function findByPidRecursive(int $pid): array
+    {
+        $connection = GeneralUtility::makeInstance(ConnectionPool::class)->getConnectionForTable('pages');
+        $queryBuilder = $connection->createQueryBuilder();
+
+        $result = $queryBuilder
+            ->select('uid')
+            ->from('pages')
+            ->where(
+                $queryBuilder->expr()->like('pid', $queryBuilder->createNamedParameter($pid, \PDO::PARAM_INT))
+            )
+            ->execute()
+            ->fetchAll();
+
+        $uids = array_column($result, 'uid');
+        foreach ($uids as $uid) {
+            $uids = array_merge($uids, $this->findByPidRecursive($uid));
+        }
+        return $uids;
+    }
+
     /**
      * Gets the pages in a site plus additional pages that may have been
      * configured.
@@ -248,9 +269,14 @@ abstract class AbstractInitializer implements IndexQueueInitializer
     protected function getPages(): array
     {
         $pages = $this->site->getPages(null, $this->indexingConfigurationName);
+
         $additionalPageIds = [];
         if (!empty($this->indexingConfiguration['additionalPageIds'])) {
-            $additionalPageIds = GeneralUtility::intExplode(',', $this->indexingConfiguration['additionalPageIds']);
+
+            if ($this->indexingConfiguration['table'] === 'tx_szdownloadcenter_domain_model_download')
+                $additionalPageIds = $this->findByPidRecursive(intval($this->indexingConfiguration['additionalPageIds']));
+            else
+                $additionalPageIds = GeneralUtility::intExplode(',', $this->indexingConfiguration['additionalPageIds']);
         }
 
         $pages = array_merge($pages, $additionalPageIds);
